@@ -7,7 +7,8 @@ const ARTICLES_PER_PAGE = 25;
 async function articleVote(
   client: RedisClientType,
   user: string,
-  article: string
+  article: string,
+  downVoted: boolean = false
 ) {
   const cutoff = Date.now() / 1000 - ONE_WEEK_IN_SECONDS;
   const postCreatedTime = await client.zScore("time:", article);
@@ -16,10 +17,18 @@ async function articleVote(
   }
 
   const articleId = article.split(":")[-1];
-  const addResult = await client.sAdd("voted:" + articleId, user);
-  if (!!addResult) {
-    await client.zIncrBy("score:", VOTE_SCORE, article);
-    await client.hIncrBy(article, "votes", 1);
+  if (!downVoted) {
+    const addResult = await client.sAdd("voted:" + articleId, user);
+    if (!!addResult) {
+      await client.zIncrBy("score:", VOTE_SCORE, article);
+      await client.hIncrBy(article, "votes", 1);
+    }
+  } else {
+    const addResult = await client.sAdd("down-voted:" + articleId, user);
+    if (!!addResult) {
+      await client.zIncrBy("score:", -VOTE_SCORE, article);
+      await client.hIncrBy(article, "votes", 1);
+    }
   }
 }
 
@@ -67,7 +76,7 @@ async function getArticles(
     REV: true,
   });
   const articles: any[] = [];
-  console.log('ids', ids)
+  console.log("ids", ids);
   for (let id of ids) {
     const articleData = await client.hGetAll(id);
     articleData["id"] = id;
@@ -123,13 +132,14 @@ async function main() {
   const postId = await postArticle(
     client as any,
     user,
-    "hello",
+    "from user1",
     `https://something`
   );
-  await postArticle(client as any, user, "hiii", `https://somethingmore`);
-  await articleVote(client as any, user, "article:" + postId);
-  await articleVote(client as any, user2, "article:" + postId);
-  const posts = await getArticles(client as any, 1, 'time:');
+  const postId2 = await postArticle(client as any, user2, "from user2", `https://somethingmore`);
+
+  await articleVote(client as any, user, "article:" + postId2);
+  await articleVote(client as any, user2, "article:" + postId, true);
+  const posts = await getArticles(client as any, 1);
   console.log("Posts with top votes", posts);
 
   await client.disconnect();
